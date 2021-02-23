@@ -21,12 +21,12 @@ typedef struct {
 
 // Reads the input CSV file of body positions and velocities, and returns an
 // array of Bodies
-Body* read_init() {
+Body* read_init(char *filename) {
 
     // Allocate space on the heap for the bodies array
     Body* bodies = (Body*) malloc(N * sizeof(Body));
 
-    FILE *init = fopen(INIT_FILE, "r");
+    FILE *init = fopen(filename, "r");
     // Throw away the header line
     fscanf(init, "%*s");
 
@@ -73,8 +73,8 @@ void time_step(Body* bodies) {
 
 
 // Naive O(n^2) solver
-int main() {
-    Body *bodies = read_init();
+int main(int argc, char *argv[]) {
+    Body *bodies = read_init(argv[1]);
     int max_time_steps = DURATION / TIME_STEP;
     for (int i=0; i<max_time_steps; i++) {
         time_step(bodies);
