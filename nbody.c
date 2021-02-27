@@ -291,8 +291,8 @@ int main(int argc, char *argv[]) {
     Body *bodies = read_init(argv[1]);
     int max_time_steps = (int) DURATION / TIME_STEP;
     for (int i=0; i<max_time_steps; i++) {
-        // barnes_hut_step(bodies);
-        naive_time_step(bodies);
+        barnes_hut_step(bodies);
+        // naive_time_step(bodies);
         if (i % OUTPUT_EVERY == 0) {
             double t = i * TIME_STEP;
             write_state(bodies, t);

@@ -6,7 +6,7 @@ from matplotlib import patches
 from PIL import Image as NewImage
 from tqdm import trange
 
-SIZE = 500
+SIZE = 800
 
 def add_boxes():
     nodes = np.array(((-75.000000, 75.000000, 50.000000),
@@ -59,7 +59,7 @@ def animate():
     bodies = df.to_numpy()
     N = max(df.id + 1)
 
-    plt.figure()#figsize=(20, 14))
+    plt.figure(figsize=(20, 14))
     for i in trange(0, df.shape[0], N):
 
         x = bodies[i:i+N, 2]

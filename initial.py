@@ -40,9 +40,14 @@ def main():
     bodies[:, Z] = np.random.uniform(Z_MIN, Z_MAX, size=N)
 
     # Give small initial velocities to break symmetry
-    bodies[:, VX] = np.random.uniform(-1, 1, size=N)
-    bodies[:, VY] = np.random.uniform(-1, 1, size=N)
+    # bodies[:, VX] = np.random.uniform(-1, 1, size=N)
+    # bodies[:, VY] = np.random.uniform(-1, 1, size=N)
     # bodies[:, VZ] = np.random.uniform(-1, 1, size=N)
+
+    # Rotation
+    bodies[:, VX] = bodies[:, Y] / Y_MAX * 10
+    bodies[:, VY] = -bodies[:, X] / X_MAX * 10
+
 
     bodies[:, MASS] = np.random.uniform(0.1, 20, size=N)
 
