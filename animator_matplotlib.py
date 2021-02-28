@@ -4,7 +4,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib import patches
 from PIL import Image as NewImage
-from tqdm import trange
+from tqdm import tqdm
 
 SIZE = 800
 
@@ -60,7 +60,7 @@ def animate():
     N = max(df.id + 1)
 
     plt.figure(figsize=(20, 14))
-    for i in trange(0, df.shape[0], N):
+    for i in tqdm(range(0, df.shape[0], N)):
 
         x = bodies[i:i+N, 2]
         y = bodies[i:i+N, 3]
