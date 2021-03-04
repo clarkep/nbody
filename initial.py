@@ -10,8 +10,8 @@ X_MIN = -100    # Coordinate boundaries for the initial positions of the bodies
 X_MAX = 100
 Y_MIN = -100
 Y_MAX = 100
-Z_MIN = 0
-Z_MAX = 0
+Z_MIN = -100
+Z_MAX = 100
 
 X, Y, Z, VX, VY, VZ, MASS = range(7)
 
@@ -47,6 +47,7 @@ def main():
     # Rotation
     bodies[:, VX] = bodies[:, Y] / Y_MAX * 10
     bodies[:, VY] = -bodies[:, X] / X_MAX * 10
+    bodies[:, VZ] = bodies[:, Y] / Y_MAX * 10
 
 
     bodies[:, MASS] = np.random.uniform(0.1, 20, size=N)

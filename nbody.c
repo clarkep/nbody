@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
-
+#include <omp.h>
 
 typedef struct {
     int id;
@@ -25,11 +25,13 @@ struct Node {
     // Coordinates of the center of the node's region
     double x;
     double y;
+    double z;
 
     // Coordinates of the center of mass of the bodies in the node. If there is
     // just one body, then this is just the position of the body.
     double center_of_mass_x;
     double center_of_mass_y;
+    double center_of_mass_z;
 
     double total_mass;
 };
@@ -77,6 +79,7 @@ Body **pointer_array(Body *bodies, int length) {
 // all the bodies and their masses)
 void write_state(Body* bodies, double t) {
     for (int i = 0; i < N; i++) {
+        // Also print out the velocities so we can calculate energy later.
         printf("%f,%d,%f,%f,%f,%f,%f,%f,%f\n",
                t, bodies[i].id, bodies[i].x, bodies[i].y, bodies[i].z,
                      bodies[i].vx, bodies[i].vy, bodies[i].vz, bodies[i].mass);
@@ -86,6 +89,8 @@ void write_state(Body* bodies, double t) {
 // Update the positions and velocities of each body based on the gravitational
 // forces on it.
 void naive_time_step(Body* bodies) {
+
+    #pragma omp parallel for
     for (int i = 0; i < N; i++) {
 
         // Update the position based on the velocity
@@ -136,27 +141,28 @@ void naive_time_step(Body* bodies) {
 void set_mass_info(Node *n) {
     double cm_x = 0.0;
     double cm_y = 0.0;
+    double cm_z = 0.0;
     double total_mass = 0.0;
 
     for (int i=0; i<n->n_bodies; i++) {
         total_mass += n->bodies[i]->mass;
         cm_x += n->bodies[i]->mass * n->bodies[i]->x;
         cm_y += n->bodies[i]->mass * n->bodies[i]->y;
+        cm_z += n->bodies[i]->mass * n->bodies[i]->z;
     }
 
     if (total_mass > 0.0) {
         n->center_of_mass_x = cm_x / total_mass;
         n->center_of_mass_y = cm_y / total_mass;
+        n->center_of_mass_z = cm_z / total_mass;
         n->total_mass = total_mass;
     } else {
         n->center_of_mass_x = 0.0;
         n->center_of_mass_y = 0.0;
+        n->center_of_mass_z = 0.0;
         n->total_mass = 0.0;
     }
 }
-
-// Alternate design idea: each node stores an array of the bodies it contains.
-// Do this if the O(N) checking for bodies inside the node takes too long.
 
 // Sets the node's bodies to contain only the bodies inside it from the given array of bodies.
 // length is the length of the bodies array here.
@@ -165,6 +171,8 @@ void bodies_in_node(Node *n, Body **bodies, int length) {
     double min_x = n->x - n->side_length / 2.0;
     double max_y = n->y + n->side_length / 2.0;
     double min_y = n->y - n->side_length / 2.0;
+    double max_z = n->z + n->side_length / 2.0;
+    double min_z = n->z - n->side_length / 2.0;
 
     // We need to loop over each body twice. Once to see the total number of bodies
     // in the region, and once again to actually put the bodies in the node. Too
@@ -174,7 +182,9 @@ void bodies_in_node(Node *n, Body **bodies, int length) {
         if (bodies[i]->x > min_x
             && bodies[i]->x < max_x
             && bodies[i]->y > min_y
-            && bodies[i]->y < max_y) {
+            && bodies[i]->y < max_y
+            && bodies[i]->z > min_z
+            && bodies[i]->z < max_z) {
                 counter += 1;
         }
     }
@@ -184,7 +194,9 @@ void bodies_in_node(Node *n, Body **bodies, int length) {
         if (bodies[i]->x > min_x
             && bodies[i]->x < max_x
             && bodies[i]->y > min_y
-            && bodies[i]->y < max_y) {
+            && bodies[i]->y < max_y
+            && bodies[i]->z > min_z
+            && bodies[i]->z < max_z) {
 
                 // If the body is inside the node, then add it to the node's bodies.
                 n->bodies[j] = bodies[i];
@@ -197,27 +209,51 @@ void bodies_in_node(Node *n, Body **bodies, int length) {
 
 void build_subtree(Node *n) {
     if (n->n_bodies > 1) {
-        n->children = (Node **) malloc(4 * sizeof(Node *));
-        for (int i=0; i<4; i++) {
+        n->children = (Node **) malloc(8 * sizeof(Node *));
+        for (int i=0; i<8; i++) {
             Node *child = malloc(sizeof(Node));
             child->children = NULL;
             child->side_length = n->side_length / 2.0;
 
             // Children as arranged like this:
+            // +z:
             // 0 1
             // 2 3
+            // -z:
+            // 4 5
+            // 6 7
             if (i == 0) {
                 child->x = n->x - child->side_length / 2.0;
                 child->y = n->y + child->side_length / 2.0;
+                child->z = n->z + child->side_length / 2.0;
             } else if (i == 1) {
                 child->x = n->x + child->side_length / 2.0;
                 child->y = n->y + child->side_length / 2.0;
+                child->z = n->z + child->side_length / 2.0;
             } else if (i == 2) {
                 child->x = n->x - child->side_length / 2.0;
                 child->y = n->y - child->side_length / 2.0;
+                child->z = n->z + child->side_length / 2.0;
             } else if (i == 3) {
                 child->x = n->x + child->side_length / 2.0;
                 child->y = n->y - child->side_length / 2.0;
+                child->z = n->z + child->side_length / 2.0;
+            } else if (i == 4) {
+                child->x = n->x - child->side_length / 2.0;
+                child->y = n->y + child->side_length / 2.0;
+                child->z = n->z - child->side_length / 2.0;
+            } else if (i == 5) {
+                child->x = n->x + child->side_length / 2.0;
+                child->y = n->y + child->side_length / 2.0;
+                child->z = n->z - child->side_length / 2.0;
+            } else if (i == 6) {
+                child->x = n->x - child->side_length / 2.0;
+                child->y = n->y - child->side_length / 2.0;
+                child->z = n->z - child->side_length / 2.0;
+            } else if (i == 7) {
+                child->x = n->x + child->side_length / 2.0;
+                child->y = n->y - child->side_length / 2.0;
+                child->z = n->z - child->side_length / 2.0;
             }
 
             // fprintf(stderr, "(%f, %f, %f),\n", child->x, child->y, child->side_length);
@@ -252,13 +288,17 @@ double max_side_length(Body *bodies) {
 // to the root node.
 Node *barnes_hut_tree(Body *bodies) {
     Node *n = malloc(sizeof(Node));
-    n->side_length = 200.0; // max_side_length(bodies);  TODO
+    n->side_length = max_side_length(bodies);
     // The center of the root node is the origin
     n->x = 0.0;
     n->y = 0.0;
-    bodies_in_node(n, pointer_array(bodies, N), N);
+    n->z = 0.0;
+
+    Body **bodies2 = pointer_array(bodies, N);
+    bodies_in_node(n, bodies2, N);
     set_mass_info(n);
     build_subtree(n);
+    free(bodies2);
     return n;
 }
 
@@ -273,7 +313,7 @@ void net_force(Body body, Node *tree, double *force) {
 
     double distance = sqrt(pow(body.x-tree->center_of_mass_x, 2.)
                            + pow(body.y-tree->center_of_mass_y, 2.)
-                           // + pow(body.z-tree->center_of_mass_z, 2.)
+                           + pow(body.z-tree->center_of_mass_z, 2.)
                            + EPS);     // Epsilon smoothing to avoid singularities
 
     if (tree->side_length / distance < THETA || tree->children == NULL) {
@@ -283,18 +323,32 @@ void net_force(Body body, Node *tree, double *force) {
         double force_mag = G * body.mass * tree->total_mass / pow(distance, 3.0);
         force[0] += force_mag * (tree->center_of_mass_x - body.x);
         force[1] += force_mag * (tree->center_of_mass_y - body.y);
-        // force[2] += force_mag * (tree->center_of_mass_z - body.z);
+        force[2] += force_mag * (tree->center_of_mass_z - body.z);
     } else {
         // Recursive case: go down into the node's children (sub-squares) and
         //  find the force from those.
-        for (int i=0; i<4; i++) {
+        for (int i=0; i<8; i++) {
             net_force(body, tree->children[i], force);
         }
     }
 }
 
+// Frees all the memory that was consumed by the tree.
+void free_tree(Node *tree) {
+    for (int i=0; i<8; i++) {
+        if (tree->children && tree->children[i]) {
+            free_tree(tree->children[i]);
+        }
+    }
+    free(tree->bodies);
+    free(tree->children);
+    free(tree);
+}
+
 void barnes_hut_step(Body *bodies) {
     Node *tree = barnes_hut_tree(bodies);
+
+    #pragma omp parallel for
     for (int i=0; i<N; i++) {
         double force[3] = {0.0, 0.0, 0.0};
         net_force(bodies[i], tree, force);
@@ -312,6 +366,8 @@ void barnes_hut_step(Body *bodies) {
         bodies[i].y += bodies[i].vy * TIME_STEP;
         bodies[i].z += bodies[i].vz * TIME_STEP;
     }
+
+    free_tree(tree);
 }
 
 
@@ -320,22 +376,20 @@ int main(int argc, char *argv[]) {
     Body *bodies = read_init(argv[1]);
     int max_time_steps = (int) DURATION / TIME_STEP;
     for (int i=0; i<max_time_steps; i++) {
-        // barnes_hut_step(bodies);
-        naive_time_step(bodies);
+        if (BRUTE_FORCE) {
+            naive_time_step(bodies);
+        } else {
+            barnes_hut_step(bodies);
+        }
         if (i % OUTPUT_EVERY == 0) {
             double t = i * TIME_STEP;
             write_state(bodies, t);
         }
-        fprintf(stderr, "\rTime step: %d/%d", i+1, max_time_steps);
+        fprintf(stderr, "\rTime step: %d/%d\tProgress: %.1f%%",
+                i+1, max_time_steps, (i+1) / (float) max_time_steps * 100.0);
         fflush(stderr);
     }
 }
-
-
-
-
-
-
 
 
 
