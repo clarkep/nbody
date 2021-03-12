@@ -3,6 +3,8 @@
 #include <math.h>
 #include <omp.h>
 
+int N=0;
+
 typedef struct {
     int id;
     double x;
@@ -11,6 +13,10 @@ typedef struct {
     double vx;
     double vy;
     double vz;
+    // for Verlet, we store a force so we don't have to compute it twice per step.
+    double Fx;
+    double Fy;
+    double Fz;
     double mass;
 } Body;
 
@@ -41,10 +47,17 @@ typedef struct Node Node;
 // array of Bodies
 Body* read_init(char *filename) {
 
-    // Allocate space on the heap for the bodies array
-    Body* bodies = (Body*) malloc(N * sizeof(Body));
-
     FILE *init = fopen(filename, "r");
+    // figure out number of bodies from number of lines 
+    fscanf(init, "%*s"); // header line
+    while (fscanf(init, "%*s") != EOF) { 
+      N += 1;
+    }
+    // allocate space for bodies
+    Body* bodies = (Body*) malloc(N*sizeof(Body));
+
+    rewind(init);
+
     // Throw away the header line
     fscanf(init, "%*s");
 
@@ -59,10 +72,12 @@ Body* read_init(char *filename) {
         bodies[i].vx = vx;
         bodies[i].vy = vy;
         bodies[i].vz = vz;
+        bodies[i].Fx = 0.;
+        bodies[i].Fy = 0.;
+        bodies[i].Fz = 0.;
         bodies[i].mass = mass;
         i += 1;
     }
-
     return bodies;
 }
 
@@ -86,23 +101,13 @@ void write_state(Body* bodies, double t) {
     }
 }
 
-// Update the positions and velocities of each body based on the gravitational
-// forces on it.
-void naive_time_step(Body* bodies) {
-
-    #pragma omp parallel for
+void naive_get_forces(Body* bodies)
+{
     for (int i = 0; i < N; i++) {
-
-        // Update the position based on the velocity
-        bodies[i].x += bodies[i].vx * TIME_STEP;
-        bodies[i].y += bodies[i].vy * TIME_STEP;
-        bodies[i].z += bodies[i].vz * TIME_STEP;
-
-        // Update the velocity based on the acceleration from the gravitational forces
-        double m1 = bodies[i].mass;
         double force_x = 0;
         double force_y = 0;
-        double force_z = 0;   // net force in each direction
+        double force_z = 0;
+        double m1 = bodies[i].mass;
         for (int j = 0; j < N; j++) {
             if (i == j) continue;
             double m2 = bodies[j].mass;
@@ -122,14 +127,37 @@ void naive_time_step(Body* bodies) {
             force_y += force * (y2 - y1);
             force_z += force * (z2 - z1);
         }
+        bodies[i].Fx = force_x;
+        bodies[i].Fy = force_y;
+        bodies[i].Fz = force_z;
+    }
+}
 
-        double accel_x = force_x / m1;
-        double accel_y = force_y / m1;
-        double accel_z = force_z / m1;
-
-        bodies[i].vx += accel_x * TIME_STEP;
-        bodies[i].vy += accel_y * TIME_STEP;
-        bodies[i].vz += accel_z * TIME_STEP;
+// Update the positions and velocities of each body based on the gravitational
+// forces on it. Uses the "velocity Verlet method"
+void naive_time_step(Body* bodies, int first) {
+    if (first) {
+      naive_get_forces(bodies);
+    }
+    // step 1: advance velocities half a time step. 
+    #pragma omp parallel for
+    for (int i = 0; i < N; i++) {
+        double m = bodies[i].mass;
+        bodies[i].vx += 0.5*(bodies[i].Fx/m)*TIME_STEP;
+        bodies[i].vy += 0.5*(bodies[i].Fy/m)*TIME_STEP;
+        bodies[i].vz += 0.5*(bodies[i].Fz/m)*TIME_STEP;
+        // Update the position based on the velocity
+        bodies[i].x += bodies[i].vx * TIME_STEP;
+        bodies[i].y += bodies[i].vy * TIME_STEP;
+        bodies[i].z += bodies[i].vz * TIME_STEP;
+    }
+    naive_get_forces(bodies);
+    #pragma omp parallel for
+    for (int i = 0; i < N; i++) {
+        double m = bodies[i].mass;
+        bodies[i].vx += 0.5*(bodies[i].Fx/m)*TIME_STEP;
+        bodies[i].vy += 0.5*(bodies[i].Fy/m)*TIME_STEP;
+        bodies[i].vz += 0.5*(bodies[i].Fz/m)*TIME_STEP;
     }
 }
 
@@ -302,7 +330,7 @@ Node *barnes_hut_tree(Body *bodies) {
     return n;
 }
 
-// Returns the net gravitational force on the given body (as an array of {x, y, z})
+// returns the net gravitational force on the given body (as an array of {x, y, z})
 void net_force(Body body, Node *tree, double *force) {
 
     if (tree == NULL) return;
@@ -333,6 +361,17 @@ void net_force(Body body, Node *tree, double *force) {
     }
 }
 
+void get_forces(Body *bodies, Node *tree) {
+    for (int i=0; i<N; i++) {
+        double force[3] = {0.0, 0.0, 0.0};
+        net_force(bodies[i], tree, force);
+        bodies[i].Fx = force[0];
+        bodies[i].Fy = force[1];
+        bodies[i].Fz = force[2];
+    }
+}
+
+
 // Frees all the memory that was consumed by the tree.
 void free_tree(Node *tree) {
     for (int i=0; i<8; i++) {
@@ -345,28 +384,31 @@ void free_tree(Node *tree) {
     free(tree);
 }
 
-void barnes_hut_step(Body *bodies) {
+void barnes_hut_step(Body *bodies, int first) {
     Node *tree = barnes_hut_tree(bodies);
-
+    if (first) {
+        get_forces(bodies, tree);
+    }
     #pragma omp parallel for
     for (int i=0; i<N; i++) {
-        double force[3] = {0.0, 0.0, 0.0};
-        net_force(bodies[i], tree, force);
-        double accel_x = force[0] / bodies[i].mass;
-        double accel_y = force[1] / bodies[i].mass;
-        double accel_z = force[2] / bodies[i].mass;
-
+        double m = bodies[i].mass;
         // update the velocity based on the acceleration
-        bodies[i].vx += accel_x * TIME_STEP;
-        bodies[i].vy += accel_y * TIME_STEP;
-        bodies[i].vz += accel_z * TIME_STEP;
+        bodies[i].vx += (bodies[i].Fx/m) * 0.5 * TIME_STEP;
+        bodies[i].vy += (bodies[i].Fy/m) * 0.5 * TIME_STEP;
+        bodies[i].vz += (bodies[i].Fz/m) * 0.5 * TIME_STEP;
 
         // update the position based on the velocity
         bodies[i].x += bodies[i].vx * TIME_STEP;
         bodies[i].y += bodies[i].vy * TIME_STEP;
         bodies[i].z += bodies[i].vz * TIME_STEP;
     }
-
+    get_forces(bodies, tree);
+    for (int i=0; i<N; i++) {
+      double m = bodies[i].mass;
+      bodies[i].vx += (bodies[i].Fx/m) * 0.5 * TIME_STEP;
+      bodies[i].vy += (bodies[i].Fy/m) * 0.5 * TIME_STEP;
+      bodies[i].vz += (bodies[i].Fz/m) * 0.5 * TIME_STEP;
+    }
     free_tree(tree);
 }
 
@@ -374,18 +416,23 @@ void barnes_hut_step(Body *bodies) {
 // Naive O(n^2) solver
 int main(int argc, char *argv[]) {
     Body *bodies = read_init(argv[1]);
-    int max_time_steps = (int) DURATION / TIME_STEP;
+    int max_time_steps = (int) (DURATION / TIME_STEP);
+    if (BRUTE_FORCE) {
+        naive_time_step(bodies, 1);
+    } else {
+        barnes_hut_step(bodies, 1);
+    }
     for (int i=0; i<max_time_steps; i++) {
         if (BRUTE_FORCE) {
-            naive_time_step(bodies);
+            naive_time_step(bodies, 0);
         } else {
-            barnes_hut_step(bodies);
+            barnes_hut_step(bodies, 0);
         }
         if (i % OUTPUT_EVERY == 0) {
             double t = i * TIME_STEP;
             write_state(bodies, t);
         }
-        fprintf(stderr, "\rTime step: %d/%d\tProgress: %.1f%%",
+        fprintf(stderr, "\rTime stepp: %d/%d\tProgress: %.1f%%",
                 i+1, max_time_steps, (i+1) / (float) max_time_steps * 100.0);
         fflush(stderr);
     }
