@@ -432,7 +432,7 @@ int main(int argc, char *argv[]) {
             double t = i * TIME_STEP;
             write_state(bodies, t);
         }
-        fprintf(stderr, "\rTime stepp: %d/%d\tProgress: %.1f%%",
+        fprintf(stderr, "\rTime step: %d/%d\tProgress: %.1f%%",
                 i+1, max_time_steps, (i+1) / (float) max_time_steps * 100.0);
         fflush(stderr);
     }
